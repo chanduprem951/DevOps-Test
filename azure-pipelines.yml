@@ -1,0 +1,51 @@
+trigger:
+- master
+
+pool:
+  name: Default
+  demands:
+    - Agent.Name -equals agent-demo-01
+
+steps:
+
+# Step 1: Show agent details
+- script: |
+    echo Agent Name: %AGENT_NAME%
+    hostname
+  displayName: 'Agent Info'
+
+# Step 2: Check Python installation
+- script: |
+    python --version
+    pip --version
+  displayName: 'Check Python'
+
+# Step 3: Install dependencies
+- script: |
+    python -m pip install --upgrade pip
+    pip install -r requirements.txt
+  displayName: 'Install Dependencies'
+
+# Step 4: Check files
+- script: |
+    echo Listing files...
+    dir
+  displayName: 'Check Project Files'
+
+# ✅ Step 5: Run Flask (FIXED - PowerShell)
+- powershell: |
+    Write-Host "Starting Flask App..."
+    Start-Process python -ArgumentList "app.py"
+    Start-Sleep -Seconds 10
+  displayName: 'Run Flask App'
+
+# Step 6: Test application
+- script: |
+    echo Testing application...
+    curl http://localhost:5000
+  displayName: 'Test App'
+
+# Step 7: Done
+- script: |
+    echo Pipeline completed successfully!
+  displayName: 'Done'
