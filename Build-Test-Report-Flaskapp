@@ -1,0 +1,122 @@
+trigger:
+- main
+
+pool:
+  name: Default
+
+variables:
+  imageName: flask-house-price
+
+stages:
+
+# =========================
+# BUILD STAGE
+# =========================
+- stage: Build
+  displayName: "Build Docker Image"
+  jobs:
+  - job: BuildJob
+    steps:
+
+    - script: |
+        echo Building Docker Image...
+        docker build -t $(imageName):latest .
+      displayName: Build Docker Image
+
+    - script: |
+        docker save $(imageName):latest -o $(Build.ArtifactStagingDirectory)\image.tar
+      displayName: Save Image
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: '$(Build.ArtifactStagingDirectory)\image.tar'
+        artifactName: docker-image
+      displayName: Publish Image Artifact
+
+
+# =========================
+# TEST STAGE
+# =========================
+- stage: Test
+  displayName: "Run Unit Tests"
+  dependsOn: Build
+  jobs:
+  - job: TestJob
+    steps:
+
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        artifactName: docker-image
+        downloadPath: '$(Pipeline.Workspace)'
+      displayName: Download Image
+
+    - script: |
+        echo Loading Docker Image...
+        docker load -i $(Pipeline.Workspace)\docker-image\image.tar
+      displayName: Load Image
+
+    - script: |
+        echo Removing old container...
+        docker rm -f test-container 2>nul
+      displayName: Clean Container
+
+    # ✅ RUN PYTEST WITH XML REPORT
+    - script: |
+        echo Running Tests with Pytest...
+        docker run --name test-container $(imageName):latest python -m pytest -v --junitxml=/app/test-results.xml
+      displayName: Run Unit Tests
+
+    # ✅ COPY TEST RESULTS
+    - script: |
+        docker cp test-container:/app/test-results.xml $(Build.ArtifactStagingDirectory)\test-results.xml
+      displayName: Copy Test Results
+
+    # CLEANUP
+    - script: |
+        docker rm -f test-container 2>nul
+      displayName: Cleanup Container
+
+
+# =========================
+# REPORT STAGE
+# =========================
+- stage: Report
+  displayName: "Publish Test Report"
+  dependsOn: Test
+  jobs:
+  - job: ReportJob
+    steps:
+
+    - task: PublishTestResults@2
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '$(Build.ArtifactStagingDirectory)\test-results.xml'
+        failTaskOnFailedTests: true
+      displayName: Publish Test Results
+
+
+# =========================
+# OPTIONAL: RUN APP
+# =========================
+- stage: RunApp
+  displayName: "Run Flask App"
+  dependsOn: Report
+  jobs:
+  - job: RunJob
+    steps:
+
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        artifactName: docker-image
+        downloadPath: '$(Pipeline.Workspace)'
+
+    - script: |
+        docker load -i $(Pipeline.Workspace)\docker-image\image.tar
+      displayName: Load Image
+
+    - script: |
+        echo Running Flask Container...
+        docker run -d -p 5000:5000 $(imageName):latest
+        timeout /t 10
+        docker ps
+      displayName: Start Flask Container
