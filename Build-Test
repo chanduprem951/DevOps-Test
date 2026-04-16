@@ -1,0 +1,73 @@
+trigger:
+- main
+
+pool:
+  name: Default
+
+variables:
+  imageName: flask-house-price
+
+stages:
+
+# =========================
+# BUILD
+# =========================
+- stage: Build
+  jobs:
+  - job: BuildJob
+    steps:
+
+    - script: |
+        echo Building Docker Image...
+        docker build -t $(imageName):latest .
+      displayName: Build Docker Image
+
+    - script: |
+        docker save $(imageName):latest -o $(Build.ArtifactStagingDirectory)\image.tar
+      displayName: Save Image
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: '$(Build.ArtifactStagingDirectory)\image.tar'
+        artifactName: docker-image
+
+
+# =========================
+# TEST
+# =========================
+- stage: Test
+  dependsOn: Build
+  jobs:
+  - job: TestJob
+    steps:
+
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        artifactName: docker-image
+        downloadPath: '$(Pipeline.Workspace)'
+
+    - script: |
+        echo Loading Image...
+        docker load -i $(Pipeline.Workspace)\docker-image\image.tar
+      displayName: Load Image
+
+    - script: |
+        echo Removing old container...
+        docker rm -f test-container 2>nul
+      displayName: Clean Container
+
+    # 🔥 DEBUG STEP (VERY IMPORTANT — DO NOT REMOVE FIRST TIME)
+    - script: |
+        echo Checking files inside container...
+        docker run $(imageName):latest ls -R /app
+      displayName: Debug Container Files
+
+    # 🔥 RUN TESTS
+    - script: |
+        echo Running Unit Tests...
+        docker run --name test-container $(imageName):latest python -m pytest -v
+      displayName: Run Unit Tests
+
+    - script: |
+        docker rm -f test-container 2>nul
+      displayName: Cleanup
